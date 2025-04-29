@@ -1,0 +1,72 @@
+# infra/k8s/order-service.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: order-service
+  labels:
+    app: order-service
+spec:
+  serviceName: order-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+      annotations:
+        statefulset.kubernetes.io/pod-name: order-service-${HOSTNAME}
+    spec:
+      containers:
+      - name: order-service
+        image: order-service:latest
+        imagePullPolicy: Never  # Use locally built image
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"  # Uses kubernetes service DNS
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        ports:
+        - containerPort: 8000
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+      volumes:
+      - name: config
+        configMap:
+          name: order-service-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-service-config
+data:
+  LOG_LEVEL: "DEBUG"
+  KAFKA_TOPIC: "orders.created"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+spec:
+  selector:
+    app: order-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP

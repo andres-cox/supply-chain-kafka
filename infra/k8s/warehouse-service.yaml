@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: warehouse-service
+  labels:
+    app: warehouse-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: warehouse-service
+  template:
+    metadata:
+      labels:
+        app: warehouse-service
+      annotations:
+        statefulset.kubernetes.io/pod-name: warehouse-service-${HOSTNAME}
+    spec:
+      containers:
+      - name: warehouse-service
+        image: warehouse-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: warehouse-service-config
+              key: LOG_LEVEL
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warehouse-service-config
+data:
+  LOG_LEVEL: "INFO"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: warehouse-service
+spec:
+  selector:
+    app: warehouse-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP

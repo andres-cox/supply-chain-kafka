@@ -1,0 +1,75 @@
+[tool.poetry]
+name = "order-service"
+version = "0.1.0"
+description = "A service for managing orders in the supply chain"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+confluent-kafka = "^2.3.0"    # Sync producer
+pydantic = "^2.7.1"           # Data validation
+python-dotenv = "^1.0.0"      # Environment variables
+loguru = "^0.7.3"
+fastapi = "^0.115.12"
+uvicorn = "^0.34.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-mock = "^3.12.0"
+mypy = "^1.15.0"
+ruff = "^0.11.4"            # Linting and formatting
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "I",   # isort
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "D",   # pydocstyle
+    "PL",  # pylint
+    "RUF", # Ruff-specific rules
+]
+ignore = [
+    "D203", # One blank line required before class docstring
+    "D212", # Multi-line docstring summary should start at the first line
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["kafka_workflow"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Unused imports
+"**/schemas/*.py" = ["N805"]  # Allow cls in Pydantic validators
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_optional = true

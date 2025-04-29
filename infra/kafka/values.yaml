@@ -1,0 +1,42 @@
+replicaCount: 3  # Good balance for fault tolerance
+
+kraft:
+  enabled: true
+  controllerQuorumVoters: "0@kafka-0.kafka-headless.default.svc.cluster.local:9093,1@kafka-1.kafka-headless.default.svc.cluster.local:9093,2@kafka-2.kafka-headless.default.svc.cluster.local:9093"
+
+auth:
+  enabled: false
+
+listeners:
+  client:
+    protocol: PLAINTEXT
+  controller:
+    protocol: PLAINTEXT
+  interbroker:
+    protocol: PLAINTEXT
+  external:
+    enabled: false
+
+externalAccess:
+  enabled: false
+
+resources:
+  limits:
+    cpu: 1
+    memory: 1.5Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+serviceAccount:
+  create: true
+
+metrics:
+  kafka:
+    enabled: true
+  jmx:
+    enabled: true
