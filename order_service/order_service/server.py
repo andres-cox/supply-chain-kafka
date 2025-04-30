@@ -75,9 +75,3 @@ def _check_kafka_connection() -> bool:
 
 app.include_router(router)
 logger.info("API router mounted.")
-
-if __name__ == "__main__":
-    logger.info("Starting FastAPI server...")
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)

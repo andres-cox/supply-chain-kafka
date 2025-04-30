@@ -39,10 +39,3 @@ async def readiness_check():
     except Exception as e:
         logger.error(f"Kafka connection failed: {e}")
         return {"status": "not ready", "kafka": "disconnected"}
-
-
-if __name__ == "__main__":
-    logger.info("Starting FastAPI server...")
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)

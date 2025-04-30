@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tracking-service
+  labels:
+    app: tracking-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tracking-service
+  template:
+    metadata:
+      labels:
+        app: tracking-service
+      annotations:
+        statefulset.kubernetes.io/pod-name: tracking-service-${HOSTNAME}
+    spec:
+      containers:
+      - name: tracking-service
+        image: tracking-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: tracking-service-config
+              key: LOG_LEVEL
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracking-service-config
+data:
+  LOG_LEVEL: "INFO"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracking-service
+spec:
+  selector:
+    app: tracking-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP

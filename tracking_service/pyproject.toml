@@ -1,15 +1,68 @@
 [tool.poetry]
 name = "tracking-service"
 version = "0.1.0"
-description = ""
+description = "Microservice for tracking order status in the supply chain"
 authors = ["Andres Cox <andreshcox@gmail.com>"]
+readme = "README.rst"
+packages = [{include = "tracking_service"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
+fastapi = "^0.110.0"
+uvicorn = "^0.29.0"
+confluent-kafka = "^2.3.0"
+pydantic = "^2.6.1"
+logging_utils = {path = "../libs/logging_utils"}
 
-[tool.poetry.dev-dependencies]
-pytest = "^5.2"
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-cov = "^4.1.0"
+mypy = "^1.8.0"
+ruff = "^0.2.1"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "I",   # isort
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "D",   # pydocstyle
+    "PL",  # pylint
+    "RUF", # Ruff-specific rules
+]
+ignore = [
+    "D203", # One blank line required before class docstring
+    "D212", # Multi-line docstring summary should start at the first line
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tracking_service"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Unused imports
+"**/schemas/*.py" = ["N805"]  # Allow cls in Pydantic validators
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_optional = true

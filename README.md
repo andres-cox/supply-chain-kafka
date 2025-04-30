@@ -1,108 +1,134 @@
-1. Microservices Architecture
-Microservice	Responsibility	Input Topics (Consumes)	Output Topics (Produces)
-Order Service	Creates shipments, validates orders	-	shipment-created
-Tracking Service	Updates real-time location (GPS/API)	shipment-created	location-updates
-Warehouse Service	Manages inventory, triggers restocks	inventory-low (from DB)	restock-requested
-Customer Portal	Displays shipment status to users	location-updates	-
-Fraud Detection	Analyzes routes for anomalies	shipment-created, location-updates	fraud-alerts
-Notification Service	Sends emails/SMS for delays/completions	fraud-alerts, location-updates	-
-Total Microservices: 6
-Minikube Viability: Yes (Minikube can handle this if allocated 4 CPUs, 8GB RAM).
+# Supply Chain Kafka Microservices
 
-Each service can run as a single replica for development.
+A microservices-based supply chain management system using Kafka for event-driven communication.
 
-Use kubectl autoscale for CPU-based scaling if needed.
+## 1. Microservices Architecture
 
-2. Kafka Cluster Setup
-Brokers & Topics
-Component	Recommendation	Notes
-Kafka Brokers	2 brokers (1 leader, 1 follower)	Minikube can handle 2 brokers with persistence enabled.
-ZooKeeper	1 node (embedded with Kafka Helm chart)	No need for separate ZooKeeper cluster in dev.
-Topics	5 topics (all with replication=2, partitions=3):
+| Microservice | Responsibility | Input Topics (Consumes) | Output Topics (Produces) |
+|--------------|----------------|------------------------|------------------------|
+| Order Service | Creates shipments, validates orders | - | shipment-created |
+| Tracking Service | Updates real-time location (GPS/API) | shipment-created | location-updates |
+| Warehouse Service | Manages inventory, triggers restocks | inventory-low (from DB) | restock-requested |
+| Customer Portal | Displays shipment status to users | location-updates | - |
+| Fraud Detection | Analyzes routes for anomalies | shipment-created, location-updates | fraud-alerts |
+| Notification Service | Sends emails/SMS for delays/completions | fraud-alerts, location-updates | - |
+
+## 2. Development Setup
+
+### Prerequisites
+- Docker and Docker Compose
+- Python 3.10+
+- Poetry 2.1.2+
+- Minikube (for local Kubernetes deployment)
+
+### Quick Start
+
+1. Build base image and services:
+```bash
+make build-base    # Build the common base image
+make build-all     # Build all service images
+```
+
+2. Start services locally:
+```bash
+make up           # Start all services with docker-compose
+```
+
+3. View logs:
+```bash
+make logs         # Watch logs from all services
+```
+
+### Project Structure
+```
+supply-chain-kafka/
+├── libs/                    # Shared libraries
+│   └── logging_utils/       # Common logging utilities using Loguru
+├── infra/
+│   ├── docker/             # Base Dockerfile and common configs
+│   ├── k8s/                # Kubernetes manifests
+│   └── kafka/              # Kafka setup and testing
+├── [service_name]/         # Each service follows this structure:
+│   ├── Dockerfile          # Extends from base image
+│   ├── pyproject.toml      # Poetry dependencies
+│   └── [service_name]/     # Service implementation
+```
+
+## 3. Features
+
+### Standardized Logging
+- Centralized logging configuration using Loguru
+- Colored terminal output for better readability
+- Structured JSON logging for ELK/Grafana integration
+- Kafka-specific logging context
+- Log rotation and compression
+
+### Docker Infrastructure
+- Multi-stage builds for optimal image size
+- Common base image with shared dependencies
+- Development-friendly with hot-reload
+- Consistent environment across services
+
+### Development Workflow
+- Poetry for dependency management
+- Make commands for common operations
+- Automated tests and formatting
+- Local development with docker-compose
+- Kubernetes deployment ready
+
+## 4. Docker Compose Services
+
+Services run on the following ports:
+- Order Service: 8001
+- Warehouse Service: 8002
+- Tracking Service: 8003
+- Kafka: 9092
+
+## 5. Kafka Setup
+
+Topics (all with replication=2, partitions=3):
 - shipment-created
 - location-updates
 - inventory-low
 - fraud-alerts
-- restock-requested	Partitioning enables parallel processing.
-Topic Configuration
-bash
-Copy
-# Example topic creation (run in Kafka pod)
-kafka-topics.sh --create \
-  --bootstrap-server kafka-0.kafka-headless:9092 \
-  --topic shipment-created \
-  --partitions 3 \
-  --replication-factor 2
-3. Minikube Resource Allocation
-Start Minikube with:
+- restock-requested
 
-bash
-Copy
-minikube start --cpus=4 --memory=8192 --driver=docker
-Helm/Kafka Setup:
+## 6. Development Commands
 
-bash
-Copy
-helm install kafka bitnami/kafka \
-  --set replicaCount=2 \
-  --set persistence.enabled=true \
-  --set persistence.size=5Gi
-Each broker gets 1 CPU, 2GB RAM (adjustable via resources in Helm).
+```bash
+# Build and Deploy
+make build-base        # Build base image
+make build-all        # Build all services
+make up              # Start services
+make down            # Stop services
 
-4. Data Flow & Scaling
-Scenario: Shipment from Warehouse to Customer
-Order Service → Publishes to shipment-created (e.g., {"shipment_id": "123", "route": ["A", "B", "C"]}).
+# Development
+make logs           # View all logs
+make test           # Run tests
+make format         # Format code
 
-Tracking Service:
+# Kubernetes
+make minikube-build  # Build for minikube
+make minikube-deploy # Deploy to kubernetes
+```
 
-Consumes shipment-created, starts polling GPS.
+## 7. Environment Variables
 
-Publishes location-updates every 5 mins (e.g., {"shipment_id": "123", "lat": 12.34, "lon": 56.78}).
+Common to all services:
+- `KAFKA_BOOTSTRAP_SERVERS`: Kafka connection string (default: kafka:9092)
+- `LOG_LEVEL`: Logging level (default: INFO)
 
-Fraud Detection:
+## 8. Contributing
 
-Compares actual route (location-updates) vs. planned route (shipment-created).
+1. Use Poetry for dependency management
+2. Follow the project structure
+3. Implement logging using logging_utils
+4. Build from base Docker image
+5. Add tests for new features
 
-Publishes fraud-alerts if deviation > 10km.
+## 9. Monitoring
 
-Customer Portal:
-
-Subscribes to location-updates, shows real-time map.
-
-Scaling Needs:
-High Throughput: Scale Tracking Service pods if GPS updates are frequent.
-
-Heavy Processing: Scale Fraud Detection pods if complex ML models are used.
-
-5. Key Technical Considerations
-Aspect	Recommendation
-Persistence	Enable Kafka persistence (5Gi per broker) to survive Minikube restarts.
-Consumer Groups	Use separate groups per service (e.g., fraud-detection-group).
-Message Format	Use Avro (with Schema Registry) for contract enforcement.
-Error Handling	Dead-letter topics (e.g., dlq-location-updates) for failed messages.
-Monitoring	Prometheus + Grafana (use kafka-exporter for metrics).
-6. Minikube Limitations & Workarounds
-Limitation	Workaround
-Limited Resources	Reduce broker replicas to 1 if CPU/memory is tight.
-No Load Balancer	Use NodePort or kubectl port-forward for local testing.
-Single Node	Not ideal for testing Kafka failovers; mock failures with kubectl delete pod.
-7. Project Folder Structure
-bash
-Copy
-supply-chain-kafka/
-├── order_service/
-│   ├── k8s/                  # Deployment, Service YAMLs
-│   └── requirements.txt      # kafka-python, requests
-├── tracking_service/         # Similar to order_service
-├── fraud_detection/
-│   └── ml_model/             # Fraud detection model (optional)
-├── infra/
-│   ├── kafka-helm-values.yaml # Custom Helm values
-│   └── prometheus/           # Monitoring configs
-└── README.md
-8. When to Move Beyond Minikube
-If: You need >3 brokers, 10+ microservices, or production-grade resilience.
-
-Then: Switch to EKS/AKS/GKE or a managed Kafka service (Confluent Cloud).
-
-This setup gives you a realistic, scalable logistics system on Minikube. Want to dive deeper into any component (e.g., fraud detection logic)? Let me know! 🚛📦
+- Logs viewable through docker-compose logs
+- Structured logging ready for ELK/Grafana
+- Health check endpoints on all services
+- Kafka topic monitoring through admin endpoints

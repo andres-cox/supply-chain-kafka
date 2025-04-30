@@ -1,34 +1,22 @@
-# Stage 1: Build
-FROM python:3.10-slim as builder
+# Build stage
+ARG BASE_IMAGE=supply-chain-base:latest
+FROM ${BASE_IMAGE} as builder
 
-WORKDIR /app
-ENV POETRY_VERSION=2.1.2
+WORKDIR /app/service
 
-# Install Poetry
-RUN pip install "poetry==$POETRY_VERSION"
+# Copy service-specific files
+COPY order_service/pyproject.toml order_service/poetry.lock ./
+COPY order_service/order_service ./order_service
 
-# Copy ALL files needed for installation
-COPY pyproject.toml poetry.lock ./
-COPY order_service ./order_service
+# Install service-specific dependencies
+RUN poetry install --no-interaction --no-ansi --only main --no-root
 
-# Install dependencies (including your package)
-RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi --only main
+# Runtime stage
+FROM ${BASE_IMAGE}
 
-# Stage 2: Runtime
-FROM python:3.10-slim
-
-WORKDIR /app
-
-# Copy Python dependencies from builder
+# Copy installed dependencies and service code
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /app/service/order_service /app/order_service
 
-# Copy application code
-COPY --from=builder /app/order_service /app/order_service
-
-# Expose the FastAPI port
 EXPOSE 8000
-
-# Start the FastAPI server
-CMD ["python", "-m", "order_service.server"]
+CMD ["python", "-m", "order_service.main"]
