@@ -6,12 +6,12 @@ A microservices-based supply chain management system using Kafka for event-drive
 
 | Microservice | Responsibility | Input Topics (Consumes) | Output Topics (Produces) |
 |--------------|----------------|------------------------|------------------------|
-| Order Service | Creates shipments, validates orders | - | shipment-created |
-| Tracking Service | Updates real-time location (GPS/API) | shipment-created | location-updates |
-| Warehouse Service | Manages inventory, triggers restocks | inventory-low (from DB) | restock-requested |
-| Customer Portal | Displays shipment status to users | location-updates | - |
-| Fraud Detection | Analyzes routes for anomalies | shipment-created, location-updates | fraud-alerts |
-| Notification Service | Sends emails/SMS for delays/completions | fraud-alerts, location-updates | - |
+| Order Service | Creates and validates orders | - | orders.created |
+| Tracking Service | Updates real-time location (GPS/API) | orders.created | locations.updated |
+| Warehouse Service | Manages inventory, processes orders | orders.created | - |
+| Fraud Detection | Analyzes orders and routes for anomalies | orders.created, locations.updated | alerts.fraud |
+| Notification Service | Sends emails/SMS notifications | locations.updated, alerts.fraud | - |
+| Analytics Service | Processes location data for insights | locations.updated | - |
 
 ## 2. Development Setup
 
@@ -86,12 +86,10 @@ Services run on the following ports:
 
 ## 5. Kafka Setup
 
-Topics (all with replication=2, partitions=3):
-- shipment-created
-- location-updates
-- inventory-low
-- fraud-alerts
-- restock-requested
+Topics (all with replication=1, partitions=3):
+- orders.created (produced by Order Service)
+- locations.updated (produced by Tracking Service)
+- alerts.fraud (produced by Fraud Detection Service)
 
 ## 6. Development Commands
 

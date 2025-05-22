@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: notification-service
+  labels:
+    app: notification-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+      annotations:
+        statefulset.kubernetes.io/pod-name: order-service-${HOSTNAME}
+    spec:
+      containers:
+      - name: notification-service
+        image: notification-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-broker:9092"
+        - name: KAFKA_CONSUMER_GROUP
+          value: "notification-group"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: MOCK_MODE
+          value: "true"
+        - name: SMTP_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: notification-config
+              key: smtp_host
+        - name: SMTP_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: notification-config
+              key: smtp_port
+        - name: SMTP_USER
+          valueFrom:
+            secretKeyRef:
+              name: notification-secrets
+              key: smtp_user
+        - name: SMTP_PASS
+          valueFrom:
+            secretKeyRef:
+              name: notification-secrets
+              key: smtp_pass
+        - name: SMS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: notification-secrets
+              key: sms_api_key
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+spec:
+  selector:
+    app: notification-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-config
+data:
+  smtp_host: "smtp.gmail.com"
+  smtp_port: "587"
+
+---
+# Example Secret (DO NOT use in production)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: notification-secrets
+type: Opaque
+stringData:
+  # These are example values - replace with your actual values in production
+  smtp_user: "your-email@gmail.com"
+  smtp_pass: "your-app-password"
+  sms_api_key: "your-sms-api-key"
