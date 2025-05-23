@@ -83,7 +83,18 @@ class TrackingConsumer:
                     # Parse message value
                     value_str = msg.value().decode("utf-8")
                     value = json.loads(value_str)
-                    logger.debug(f"Received message: {value_str}")
+                    logger.debug(f"Received message from {msg.topic()}: {value_str}")
+
+                    # Handle different message types based on topic
+                    if msg.topic() == "alerts.fraud":
+                        # For fraud alerts, just pass the dict to the handler
+                        await handler(value)
+                        logger.info(f"Processed fraud alert for order {value.get('order_id')}")
+                        continue
+
+                    # Only process orders.created messages as tracking events
+                    if msg.topic() != "orders.created":
+                        continue
 
                     # Determine priority (demo: 20% express, 30% high, 50% standard)
                     if "priority" in value:
@@ -140,13 +151,13 @@ class TrackingConsumer:
                     # Handle the event
                     await handler(tracking_event)
 
-                    # Process the message (simulate update)
+                    # Log success
                     logger.info(
-                        f"Successfully processed tracking event | tracking_id={getattr(tracking_event, 'tracking_id', None)} | "
+                        f"Successfully processed tracking event | order_id={tracking_event.order_id} | "
                         f"current_location={tracking_event.current_location.name} | "
                         f"next_location={tracking_event.next_location.name if tracking_event.next_location else None} | "
                         f"checkpoint={tracking_event.current_checkpoint}/{len(tracking_event.route_checkpoints)} | "
-                        f"priority={tracking_event.priority.value} | topic={msg.topic()} | partition={msg.partition()} | offset={msg.offset()}"
+                        f"priority={tracking_event.priority.value}"
                     )
 
                 except json.JSONDecodeError as e:

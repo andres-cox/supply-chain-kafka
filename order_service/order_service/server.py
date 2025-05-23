@@ -63,10 +63,10 @@ def _check_kafka_connection() -> bool:
         bool: True if Kafka is accessible, False otherwise.
     """
     try:
-        logger.info("Checking Kafka connection...")
+        # logger.info("Checking Kafka connection...")
         admin = AdminClient({"bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS")})
         result = bool(admin.list_topics(timeout=5))
-        logger.info(f"Kafka connection status: {'connected' if result else 'no topics found'}")
+        # logger.info(f"Kafka connection status: {'connected' if result else 'no topics found'}")
         return result
     except Exception as e:
         logger.error(f"Kafka connection failed: {e}", exc_info=True)

@@ -57,12 +57,22 @@ class TrackingState:
         self._tracking_store: dict[str, TrackingEvent] = {}
         self.consumer: Optional[TrackingConsumer] = None
         self._update_tasks: dict[str, asyncio.Task] = {}
+        self._on_hold_orders: set[str] = set()  # Track orders on hold
 
     async def simulate_route_progress(self, order_id: str) -> None:
         """Simulate package movement along its route."""
         event = self._tracking_store[order_id]
         try:
             while event.current_checkpoint < len(event.route_checkpoints) - 1:
+                # Check if order is on hold before any updates
+                if self.is_on_hold(order_id):
+                    logger.warning(f"Stopping route simulation for order {order_id} - Order is on hold due to fraud alert")
+                    # Update all items to show on-hold status
+                    for item in event.items:
+                        item.status = "on_hold"
+                        item.timestamp = datetime.utcnow()
+                    return  # Stop simulation immediately
+
                 # Wait between updates (shorter for demo)
                 await asyncio.sleep(20)  # 20 seconds between updates for demo
 
@@ -149,16 +159,67 @@ class TrackingState:
 
         return list(events)
 
+    def mark_on_hold(self, order_id: str) -> None:
+        """Mark an order as on hold due to fraud alert."""
+        self._on_hold_orders.add(order_id)
+        event = self._tracking_store.get(order_id)
+        if event:
+            # Update event and all items to on-hold status
+            for item in event.items:
+                item.status = "on_hold"
+                item.timestamp = datetime.utcnow()
+            event.event_type = "order_on_hold"
+            
+            # Log the on-hold status
+            logger.warning(
+                f"Order placed on hold due to fraud alert | order_id={order_id} | "
+                f"current_location={event.current_location.name if event.current_location else 'unknown'}"
+            )
+            
+            # Send status update
+            if self.producer:
+                self.producer.send_tracking_update("locations.updated", event)
 
-async def handle_tracking_event(event: TrackingEvent) -> None:
+    def is_on_hold(self, order_id: str) -> bool:
+        """Check if an order is on hold."""
+        return order_id in self._on_hold_orders
+
+
+async def handle_tracking_event(event: dict | TrackingEvent) -> None:
     """Handle incoming tracking events (async).
 
     Args:
-        event: The tracking event to process
+        event: The event data to process (either tracking event or fraud alert)
     """
-    state.store_event(event)
-    if event.event_type in ["location_update", "delivery_complete"]:
-        if state.producer:
+    # Handle fraud alerts - check for any of the known fraud alert types
+    if isinstance(event, dict) and "alert_type" in event and event["alert_type"] in [
+        "unusual_route",
+        "rapid_location_change",
+        "known_fraud_pattern",
+        "suspicious_timing"
+    ]:
+        order_id = event.get("order_id")
+        if order_id:
+            logger.warning(f"Received fraud alert for order {order_id} of type {event['alert_type']}")
+            state.mark_on_hold(order_id)
+            # Cancel simulation task if it exists
+            if order_id in state._update_tasks:
+                task = state._update_tasks[order_id]
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        logger.info(f"Successfully cancelled simulation for order {order_id}")
+            return
+
+    # Handle tracking events
+    if isinstance(event, TrackingEvent):
+        # Only store if not already tracked
+        if event.order_id not in state._tracking_store:
+            state.store_event(event)
+        # Send updates only for location changes
+        elif event.event_type in ["location_update", "delivery_complete"] and state.producer:
             state.producer.send_tracking_update(
                 topic="locations.updated",
                 tracking_event=event
@@ -178,8 +239,9 @@ async def lifespan(app: FastAPI):
         group_id="tracking-service-group",
         auto_offset_reset="earliest",
     )
-    state.consumer.subscribe(["orders.created"])
-    logger.info("Subscribed to topic: orders.created")
+    # Subscribe to both orders.created and alerts.fraud topics
+    state.consumer.subscribe(["orders.created", "alerts.fraud"])
+    logger.info("Subscribed to topics: orders.created, alerts.fraud")
 
     # Start consumer as asyncio background task
     consumer_task = asyncio.create_task(state.consumer.process_messages(handle_tracking_event))
