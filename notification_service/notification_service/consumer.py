@@ -21,6 +21,21 @@ DEFAULT_CONSUMER_CONFIG = {
 }
 
 DELIVERY_STATUSES = {
+    "processing": {
+        "notify": True,
+        "priority": "low",
+        "subject": "Order Processing",
+    },
+    "at_distribution_center": {
+        "notify": True,
+        "priority": "medium",
+        "subject": "At Distribution Center",
+    },
+    "in_transit": {
+        "notify": True,
+        "priority": "medium",
+        "subject": "In Transit",
+    },
     "delivered": {
         "notify": True,
         "priority": "medium",
@@ -33,26 +48,6 @@ DELIVERY_STATUSES = {
     },
 }
 
-# Mock data for testing
-MOCK_NOTIFICATIONS = [
-    {
-        "topic": "fraud.alerts",
-        "value": {
-            "customer_id": "mock-customer-1",
-            "order_id": "mock-order-1",
-            "details": "Suspicious activity detected",
-        },
-    },
-    {
-        "topic": "delivery.updates",
-        "value": {
-            "customer_id": "mock-customer-2",
-            "order_id": "mock-order-2",
-            "status": "delivered",
-        },
-    },
-]
-
 
 class NotificationConsumer:
     """Consumer for processing notification events."""
@@ -63,7 +58,6 @@ class NotificationConsumer:
         group_id: str,
         auto_offset_reset: str = "earliest",
         enable_auto_commit: bool = True,
-        mock_mode: bool = False,
     ):
         """Initialize the notification consumer.
 
@@ -72,27 +66,25 @@ class NotificationConsumer:
             group_id: Consumer group ID
             auto_offset_reset: Where to start consuming from if no offset is stored
             enable_auto_commit: Whether to auto-commit offsets
-            mock_mode: If True, will only log actions instead of sending actual notifications
+            mock_mode: (ignored, always False)
         """
-        self.mock_mode = mock_mode
         self.stats = {"messages_processed": 0, "errors": 0, "start_time": time.time()}
 
         logger.info(
             f"Initializing consumer with bootstrap_servers={bootstrap_servers}, "
-            f"group_id={group_id}, mock_mode={mock_mode}"
+            f"group_id={group_id}"
         )
 
-        if not mock_mode:
-            config = DEFAULT_CONSUMER_CONFIG.copy()
-            config.update(
-                {
-                    "bootstrap.servers": bootstrap_servers,
-                    "group.id": group_id,
-                    "auto.offset.reset": auto_offset_reset,
-                    "enable.auto.commit": enable_auto_commit,
-                }
-            )
-            self.consumer = Consumer(config)
+        config = DEFAULT_CONSUMER_CONFIG.copy()
+        config.update(
+            {
+                "bootstrap.servers": bootstrap_servers,
+                "group.id": group_id,
+                "auto.offset.reset": auto_offset_reset,
+                "enable.auto.commit": enable_auto_commit,
+            }
+        )
+        self.consumer = Consumer(config)
 
         # Mock storage for user preferences (in production, use a database)
         self._preferences: dict[str, NotificationPreferences] = {}
@@ -104,8 +96,7 @@ class NotificationConsumer:
             topics: List of topic names to subscribe to
         """
         logger.info(f"Subscribing to topics: {topics}")
-        if not self.mock_mode:
-            self.consumer.subscribe(topics)
+        self.consumer.subscribe(topics)
         logger.info("Successfully subscribed to topics")
 
     def process_messages(self, notification_handler: Callable[[Notification], None]) -> None:
@@ -117,11 +108,6 @@ class NotificationConsumer:
         logger.info("Starting message processing loop")
         last_status_log = time.time()
         STATUS_LOG_INTERVAL = 300  # Log status every 5 minutes
-
-        if self.mock_mode:
-            logger.info("Running in mock mode - no actual notifications will be sent")
-            self._process_mock_messages(notification_handler)
-            return
 
         try:
             while True:
@@ -147,13 +133,7 @@ class NotificationConsumer:
 
                     # Log message metadata for debugging
                     logger.debug(
-                        "Received message",
-                        extra={
-                            "topic": msg.topic(),
-                            "partition": msg.partition(),
-                            "offset": msg.offset(),
-                            "timestamp": msg.timestamp(),
-                        },
+                        f"Received message | topic={msg.topic()} | partition={msg.partition()} | offset={msg.offset()} | timestamp={msg.timestamp()}"
                     )
 
                     # Parse and process message
@@ -162,9 +142,9 @@ class NotificationConsumer:
 
                     # Process based on topic
                     topic = msg.topic()
-                    if topic == "fraud.alerts":
+                    if topic == "alerts.fraud":
                         self._process_fraud_alert(value, notification_handler)
-                    elif topic == "delivery.updates":
+                    elif topic == "locations.updated":
                         self._process_delivery_update(value, notification_handler)
 
                     self.stats["messages_processed"] += 1
@@ -180,22 +160,7 @@ class NotificationConsumer:
             logger.info("Shutting down consumer...")
         finally:
             self._log_status()  # Log final stats
-            if not self.mock_mode:
-                self.consumer.close()
-
-    def _process_mock_messages(self, notification_handler: Callable[[Notification], None]) -> None:
-        """Process mock messages for testing.
-
-        Args:
-            notification_handler: Callback function to handle notifications
-        """
-        for mock_msg in MOCK_NOTIFICATIONS:
-            logger.info(f"[MOCK] Processing message from topic: {mock_msg['topic']}")
-            if mock_msg["topic"] == "fraud.alerts":
-                self._process_fraud_alert(mock_msg["value"], notification_handler)
-            elif mock_msg["topic"] == "delivery.updates":
-                self._process_delivery_update(mock_msg["value"], notification_handler)
-            self.stats["messages_processed"] += 1
+            self.consumer.close()
 
     def _log_status(self) -> None:
         """Log consumer status and statistics."""
@@ -203,14 +168,7 @@ class NotificationConsumer:
         msg_rate = self.stats["messages_processed"] / runtime if runtime > 0 else 0
 
         logger.info(
-            "Consumer status",
-            extra={
-                "messages_processed": self.stats["messages_processed"],
-                "errors": self.stats["errors"],
-                "runtime_seconds": runtime,
-                "messages_per_second": round(msg_rate, 2),
-                "mock_mode": self.mock_mode,
-            },
+            f"Consumer status | messages_processed={self.stats['messages_processed']} | errors={self.stats['errors']} | runtime_seconds={runtime:.2f} | messages_per_second={msg_rate:.2f}"
         )
 
     def _process_fraud_alert(
@@ -230,15 +188,8 @@ class NotificationConsumer:
                 message=f"Alert: {alert_data['details']} for Order #{alert_data['order_id']}",
                 priority="high",
             )
-            if self.mock_mode:
-                logger.info(f"[MOCK] Would send fraud alert: {notification.message}")
-                logger.info(f"[MOCK] To: {notification.customer_id}")
-                logger.info("[MOCK] Via: Email and SMS (if configured)")
-            else:
-                notification_handler(notification)
-            logger.info(
-                f"{'[MOCK] ' if self.mock_mode else ''}Created fraud alert notification: {notification.notification_id}"
-            )
+            notification_handler(notification)
+            logger.info(f"Created fraud alert notification: {notification.notification_id}")
         except Exception as e:
             logger.error(f"Error creating fraud alert notification: {e}")
             self.stats["errors"] += 1
@@ -249,60 +200,62 @@ class NotificationConsumer:
         """Process a delivery update and create a notification if needed.
 
         Args:
-            update_data: Delivery update data from Kafka
+            update_data: Delivery update data from Kafka (tracking_service schema)
             notification_handler: Callback to handle the notification
         """
         try:
-            status = update_data.get("status", "unknown")
+            # Extract status from event_type or items
+            status = None
+            if "event_type" in update_data:
+                if update_data["event_type"] == "delivery_complete":
+                    status = "delivered"
+                elif update_data["event_type"] == "location_update":
+                    # Try to infer from items or fallback
+                    status = update_data.get("items", [{}])[0].get("status", "in_transit")
+            if not status and "items" in update_data and update_data["items"]:
+                status = update_data["items"][0].get("status", "in_transit")
+            if not status:
+                status = "in_transit"
+
             status_config = DELIVERY_STATUSES.get(status)
 
             if status_config and status_config["notify"]:
                 notification = Notification(
-                    customer_id=update_data["customer_id"],
+                    customer_id=update_data.get("customer_id", "unknown"),
                     type="delivery_update" if status == "delivered" else "delay",
                     subject=status_config["subject"],
-                    message=self._format_delivery_message(update_data),
+                    message=self._format_delivery_message(update_data, status),
                     priority=status_config["priority"],
                     timestamp=datetime.now(timezone.utc).isoformat(),
                 )
-
-                if self.mock_mode:
-                    logger.info(f"[MOCK] Would send delivery update: {notification.message}")
-                    logger.info(f"[MOCK] To: {notification.customer_id}")
-                    logger.info("[MOCK] Via: Email and SMS (if configured)")
-                else:
-                    notification_handler(notification)
-
+                notification_handler(notification)
                 logger.info(
-                    f"{'[MOCK] ' if self.mock_mode else ''}Created delivery notification",
-                    extra={
-                        "notification_id": notification.notification_id,
-                        "customer_id": notification.customer_id,
-                        "type": notification.type,
-                        "priority": notification.priority,
-                    },
+                    f"Created delivery notification | notification_id={notification.notification_id} | customer_id={notification.customer_id} | type={notification.type} | priority={notification.priority}"
                 )
         except Exception as e:
             logger.error(f"Error creating delivery notification: {e}", exc_info=True)
             self.stats["errors"] += 1
 
-    def _format_delivery_message(self, update_data: dict) -> str:
-        """Format a delivery update message.
-
-        Args:
-            update_data: Delivery update data
-
-        Returns:
-            str: Formatted message
-        """
-        if update_data.get("status") == "delivered":
-            return f"Your order #{update_data['order_id']} has been delivered!"
-        elif update_data.get("status") == "delayed":
+    def _format_delivery_message(self, update_data: dict, status: str = None) -> str:
+        """Format a delivery update message for tracking_service schema."""
+        order_id = update_data.get("order_id", "unknown")
+        if status is None:
+            status = update_data.get("items", [{}])[0].get("status", "in_transit")
+        if status == "delivered":
+            return f"Your order #{order_id} has been delivered!"
+        elif status == "delayed":
+            est = update_data.get("estimated_delivery", "TBD")
             return (
-                f"Your order #{update_data['order_id']} is experiencing a delay. "
-                f"New estimated delivery: {update_data.get('estimated_delivery', 'TBD')}"
+                f"Your order #{order_id} is experiencing a delay. "
+                f"New estimated delivery: {est}"
             )
-        return f"Status update for order #{update_data['order_id']}: {update_data.get('status', 'unknown')}"
+        elif status == "at_distribution_center":
+            return f"Your order #{order_id} has arrived at a distribution center."
+        elif status == "processing":
+            return f"Your order #{order_id} is being processed."
+        elif status == "in_transit":
+            return f"Your order #{order_id} is in transit."
+        return f"Status update for order #{order_id}: {status}"
 
     def set_preferences(self, preferences: NotificationPreferences) -> None:
         """Set notification preferences for a customer.
@@ -326,6 +279,5 @@ class NotificationConsumer:
 
     def close(self) -> None:
         """Close the consumer connection."""
-        if not self.mock_mode:
-            self.consumer.close()
+        self.consumer.close()
         logger.info("Consumer closed")

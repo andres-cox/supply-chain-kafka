@@ -25,9 +25,6 @@ class NotificationState:
     def __init__(self):
         """Initialize notification state."""
         self.consumer: NotificationConsumer | None = None
-        self.mock_mode: bool = os.getenv("MOCK_MODE", "false").lower() == "true"
-        if self.mock_mode:
-            logger.info("🛈 Starting notification service in MOCK mode")
         self.handler = NotificationHandler()
         self._notifications: dict[str, Notification] = {}
 
@@ -85,24 +82,23 @@ async def lifespan(app: FastAPI):
     group_id = os.getenv("KAFKA_CONSUMER_GROUP", "notification-group")
 
     state.consumer = NotificationConsumer(
-        bootstrap_servers=bootstrap_servers, group_id=group_id, mock_mode=state.mock_mode
+        bootstrap_servers=bootstrap_servers, group_id=group_id
     )
 
     # Set up notification handler
     handler = NotificationHandler()
 
     # Subscribe to topics
-    topics = ["fraud.alerts", "delivery.updates"]
-    if not state.mock_mode:
-        state.consumer.subscribe(topics)
-    logger.info(f"{'[MOCK] ' if state.mock_mode else ''}Subscribed to topics: {', '.join(topics)}")
+    topics = ["alerts.fraud", "locations.updated"]
+    state.consumer.subscribe(topics)
+    logger.info(f"Subscribed to topics: {', '.join(topics)}")
 
     # Start consumer in background thread
     consumer_thread = threading.Thread(
         target=state.consumer.process_messages, args=(handle_notification,), daemon=True
     )
     consumer_thread.start()
-    logger.info(f"{'[MOCK] ' if state.mock_mode else ''}Consumer thread started")
+    logger.info("Consumer thread started")
 
     yield  # FastAPI will run the application here
 

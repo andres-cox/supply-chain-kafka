@@ -17,11 +17,11 @@ class NotificationPreferences(BaseModel):
         types: Types of notifications to receive
     """
 
-    customer_id: str = Field(..., min_length=5)
-    email: EmailStr | None = None
-    sms: str | None = Field(None, pattern=r"^\+[1-9]\d{1,14}$")
-    channels: list[Literal["email", "sms"]] = ["email"]
-    types: list[Literal["fraud_alert", "delivery_update", "delay"]] = ["fraud_alert", "delivery_update"]
+    customer_id: str = Field(..., min_length=5, example="cust-12345")
+    email: EmailStr | None = Field(None, example="user@example.com")
+    sms: str | None = Field(None, pattern=r"^\+[1-9]\d{1,14}$", example="+1234567890")
+    channels: list[Literal["email", "sms"]] = Field(default_factory=lambda: ["email"], example=["email", "sms"])
+    types: list[Literal["fraud_alert", "delivery_update"]] = Field(default_factory=lambda: ["fraud_alert", "delivery_update"], example=["fraud_alert", "delivery_update"])
 
 
 class Notification(BaseModel):

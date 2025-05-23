@@ -1,9 +1,9 @@
 """FastAPI server implementation for the Tracking Service."""
 
+import asyncio
 import os
-import threading
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 from confluent_kafka.admin import AdminClient
@@ -12,7 +12,14 @@ from logging_utils.config import get_kafka_logger, setup_service_logger
 
 from tracking_service.consumer import TrackingConsumer
 from tracking_service.producer import TrackingProducer
-from tracking_service.schemas import ShipmentPriority, TrackingEvent
+from tracking_service.schemas import (
+    PREDEFINED_LOCATIONS,
+    ROUTES,
+    Location,
+    ShipmentPriority,
+    TrackingEvent,
+    TrackingItem,
+)
 
 # Configure service logger
 logger = setup_service_logger(
@@ -24,27 +31,101 @@ logger = setup_service_logger(
 kafka_logger = get_kafka_logger("tracking-service")
 
 
+def calculate_next_location(route_checkpoints: list[str], current_checkpoint: int) -> tuple[Location | None, int]:
+    """Calculate the next location in the route."""
+    if current_checkpoint + 1 < len(route_checkpoints):
+        next_checkpoint = current_checkpoint + 1
+        return PREDEFINED_LOCATIONS[route_checkpoints[next_checkpoint]], next_checkpoint
+    return None, current_checkpoint
+
+
+def get_status_for_location(location_type: str) -> str:
+    """Get the appropriate status for a location type."""
+    return {
+        "warehouse": "processing",
+        "distribution_center": "at_distribution_center",
+        "delivery_point": "delivered"
+    }.get(location_type, "in_transit")
+
+
 class TrackingState:
     """Class to manage tracking service state."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize tracking state."""
         self.producer: Optional[TrackingProducer] = None
         self._tracking_store: dict[str, TrackingEvent] = {}
         self.consumer: Optional[TrackingConsumer] = None
+        self._update_tasks: dict[str, asyncio.Task] = {}
+
+    async def simulate_route_progress(self, order_id: str) -> None:
+        """Simulate package movement along its route."""
+        event = self._tracking_store[order_id]
+        try:
+            while event.current_checkpoint < len(event.route_checkpoints) - 1:
+                # Wait between updates (shorter for demo)
+                await asyncio.sleep(20)  # 20 seconds between updates for demo
+
+                # Update location and status
+                next_location, next_checkpoint = calculate_next_location(
+                    event.route_checkpoints, event.current_checkpoint
+                )
+                
+                if next_location:
+                    event.current_checkpoint = next_checkpoint
+                    event.current_location = next_location
+                    new_status = get_status_for_location(next_location.type)
+                    
+                    # Update items status
+                    for item in event.items:
+                        item.status = new_status
+                        item.location = next_location
+                        item.timestamp = datetime.utcnow()
+
+                    # Calculate next location
+                    event.next_location, _ = calculate_next_location(
+                        event.route_checkpoints, event.current_checkpoint
+                    )
+
+                    # Log the update
+                    logger.info(
+                        f"Package location updated | order_id={order_id} | stage={new_status} | checkpoint={event.current_checkpoint + 1}/{len(event.route_checkpoints)} | "
+                        f"from={event.current_location.name} | to={next_location.name} | next={event.next_location.name if event.next_location else 'FINAL'} | status={new_status}"
+                    )
+
+                    # Emit location update
+                    if self.producer:
+                        event.event_type = "delivery_complete" if new_status == "delivered" else "location_update"
+                        self.producer.send_tracking_update("locations.updated", event)
+
+        except Exception as e:
+            logger.error(
+                "Error in route simulation",
+                extra={
+                    "order_id": order_id,
+                    "error": str(e)
+                }
+            )
 
     def store_event(self, event: TrackingEvent) -> None:
-        """Store a tracking event."""
+        """Store a tracking event and start location simulation."""
         self._tracking_store[event.order_id] = event
+        
+        # Log initial state
         logger.info(
-            f"Stored tracking event",
+            "New tracking event created",
             extra={
                 "order_id": event.order_id,
-                "event_type": event.event_type,
-                "location": event.current_location.name,
-                "status": event.items[0].status if event.items else None
+                "customer_id": event.customer_id,
+                "start_location": event.current_location.name,
+                "route_type": "express" if len(event.route_checkpoints) < 4 else "standard",
+                "estimated_delivery": event.estimated_delivery.isoformat() if event.estimated_delivery else "unknown"
             }
         )
+
+        # Start location simulation
+        task = asyncio.create_task(self.simulate_route_progress(event.order_id))
+        self._update_tasks[event.order_id] = task
 
     def get_event(self, order_id: str) -> Optional[TrackingEvent]:
         """Get a tracking event by order ID."""
@@ -69,16 +150,13 @@ class TrackingState:
         return list(events)
 
 
-def handle_tracking_event(event: TrackingEvent) -> None:
-    """Handle incoming tracking events.
+async def handle_tracking_event(event: TrackingEvent) -> None:
+    """Handle incoming tracking events (async).
 
     Args:
         event: The tracking event to process
     """
-    # Store the event
     state.store_event(event)
-
-    # Produce location update if needed
     if event.event_type in ["location_update", "delivery_complete"]:
         if state.producer:
             state.producer.send_tracking_update(
@@ -90,41 +168,31 @@ def handle_tracking_event(event: TrackingEvent) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage the lifecycle of the FastAPI application."""
-    # Startup: Initialize producer and consumer
     bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-    
     state.producer = TrackingProducer(
         bootstrap_servers=bootstrap_servers,
         client_id="tracking-service"
     )
-
     state.consumer = TrackingConsumer(
         bootstrap_servers=bootstrap_servers,
         group_id="tracking-service-group",
         auto_offset_reset="earliest",
     )
-
-    # Subscribe to orders.created topic
     state.consumer.subscribe(["orders.created"])
     logger.info("Subscribed to topic: orders.created")
 
-    # Start consumer in background thread
-    consumer_thread = threading.Thread(
-        target=state.consumer.process_messages,
-        args=(handle_tracking_event,),
-        daemon=True,
-    )
-    consumer_thread.start()
-    logger.info("Consumer thread started")
+    # Start consumer as asyncio background task
+    consumer_task = asyncio.create_task(state.consumer.process_messages(handle_tracking_event))
+    logger.info("Consumer background task started")
 
     yield
 
-    # Shutdown
     logger.info("Shutting down tracking service...")
     if state.consumer:
         state.consumer.close()
     if state.producer:
         state.producer.close()
+    consumer_task.cancel()
     logger.info("Shutdown complete")
 
 

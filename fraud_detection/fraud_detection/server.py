@@ -117,7 +117,7 @@ def handle_fraud_alert(alert: FraudAlert) -> None:
 
     # Publish to Kafka
     if state.producer:
-        state.producer.send_fraud_alert("fraud.alerts", alert)
+        state.producer.send_fraud_alert("alerts.fraud", alert)
 
     logger.info(f"Processed fraud alert: {alert.alert_id}")
 

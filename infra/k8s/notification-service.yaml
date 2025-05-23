@@ -24,13 +24,7 @@ spec:
         - containerPort: 8000
         env:
         - name: KAFKA_BOOTSTRAP_SERVERS
-          value: "kafka-broker:9092"
-        - name: KAFKA_CONSUMER_GROUP
-          value: "notification-group"
-        - name: LOG_LEVEL
-          value: "INFO"
-        - name: MOCK_MODE
-          value: "true"
+          value: "kafka:9092"
         - name: SMTP_HOST
           valueFrom:
             configMapKeyRef:

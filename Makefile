@@ -100,6 +100,10 @@ stop-forwards:
 start-minikube:
 	bash ./infra/minikube/start-minikube.sh
 
+minikube-dashboard:
+	@echo "Open http://localhost:9001/api/v1/namespaces/kubernetes-dashboard/services/http:kubernetes-dashboard:/proxy/#/workloads?namespace=default"
+	kubectl proxy --port=9001
+
 install-kafka:
 	bash ./infra/kafka/install-kafka.sh
 
